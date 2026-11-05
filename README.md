@@ -37,7 +37,6 @@ Latest verification:
 | dbt data-quality tests | 9 passed |
 | PostgreSQL / Redpanda / SeaweedFS | Healthy |
 
-Note: the Spark run shown above preceded the later increase in PostgreSQL to 70 records. Rerun Spark and upload Parquet again to bring the lake fully up to date with all 70 records.
 
 ## Local setup
 

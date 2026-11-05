@@ -56,6 +56,45 @@ services:
       timeout: 5s
       retries: 10
 
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: atlas-api
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: atlas
+      REDPANDA_ADMIN_URL: http://redpanda:9644
+      S3_HEALTH_URL: http://minio:9000/minio/health/live
+    ports:
+      - "127.0.0.1:18000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: atlas-dashboard
+    restart: unless-stopped
+    environment:
+      ATLAS_API_URL: http://api:8000
+    ports:
+      - "127.0.0.1:18501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   redpanda-data:
   seaweedfs-data:

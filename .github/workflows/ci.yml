@@ -58,6 +58,12 @@ jobs:
           cp .env.example .env
           docker compose config --quiet
 
+      - name: Build API container
+        run: docker build -f Dockerfile.api -t atlas-api:ci .
+
+      - name: Build dashboard container
+        run: docker build -f Dockerfile.dashboard -t atlas-dashboard:ci .
+
       - name: Validate dbt project parsing
         run: |
           mkdir -p "$RUNNER_TEMP/atlas-dbt"

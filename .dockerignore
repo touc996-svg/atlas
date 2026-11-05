@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+.env
+.env.*
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+data/
+atlas_analytics/target/
+atlas_analytics/dbt_packages/
+*.parquet
+*.log

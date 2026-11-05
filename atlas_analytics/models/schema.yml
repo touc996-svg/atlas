@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: stg_atlas_events
+    description: Cleaned and standardized events from the ATLAS ingestion pipeline.
+    columns:
+      - name: event_id
+        data_tests:
+          - unique
+          - not_null
+      - name: event_type
+        data_tests:
+          - not_null
+      - name: source
+        data_tests:
+          - not_null
+
+  - name: fct_atlas_events
+    description: Analytics-ready event-level fact table.
+    columns:
+      - name: event_id
+        data_tests:
+          - unique
+          - not_null
+      - name: event_type
+        data_tests:
+          - not_null
+
+  - name: dim_atlas_event_types
+    description: Event volume and timestamp metrics grouped by event type and source.
+    columns:
+      - name: event_type
+        data_tests:
+          - not_null
+      - name: source
+        data_tests:
+          - not_null

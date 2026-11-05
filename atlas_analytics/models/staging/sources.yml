@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: atlas
+    schema: public
+    tables:
+      - name: events
+        identifier: atlas_events

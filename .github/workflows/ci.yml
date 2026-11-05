@@ -1,0 +1,78 @@
+name: ATLAS CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: atlas-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Python, dbt, and Docker validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Compile Python modules
+        run: python -m compileall -q src tests
+
+      - name: Run automated tests
+        env:
+          POSTGRES_USER: atlas_ci
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: atlas_ci
+        run: PYTHONPATH=src pytest -q
+
+      - name: Check dependency consistency
+        run: pip check
+
+      - name: Validate Docker Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+
+      - name: Validate dbt project parsing
+        run: |
+          mkdir -p "$RUNNER_TEMP/atlas-dbt"
+          cat > "$RUNNER_TEMP/atlas-dbt/profiles.yml" <<'EOF'
+          atlas_analytics:
+            target: ci
+            outputs:
+              ci:
+                type: postgres
+                host: localhost
+                user: atlas_ci
+                password: ci-only-password
+                port: 5432
+                dbname: atlas_ci
+                schema: analytics
+                threads: 2
+          EOF
+          dbt parse             --project-dir atlas_analytics             --profiles-dir "$RUNNER_TEMP/atlas-dbt"             --no-partial-parse

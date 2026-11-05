@@ -6,6 +6,7 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
 import psycopg
+from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 from fastapi import FastAPI, HTTPException, Query
 
@@ -15,21 +16,19 @@ def get_database_url() -> str:
     if url:
         return url
 
-    required = ("POSTGRES_USER", "POSTGRES_PASSWORD")
-    missing = [key for key in required if not os.getenv(key)]
-    if missing:
+    password = os.getenv("POSTGRES_PASSWORD")
+    if not password or not os.getenv("POSTGRES_USER"):
         raise RuntimeError(
             "Set DATABASE_URL or configure POSTGRES_USER and POSTGRES_PASSWORD."
         )
 
-    return (
-        f"postgresql://{os.environ['POSTGRES_USER']}:"
-        f"{os.environ['POSTGRES_PASSWORD']}@"
-        f"{os.getenv('POSTGRES_HOST', 'localhost')}:"
-        f"{os.getenv('POSTGRES_PORT', '5432')}/"
-        f"{os.getenv('POSTGRES_DB', 'atlas')}"
+    return make_conninfo(
+        host=os.getenv("POSTGRES_HOST", "localhost"),
+        port=os.getenv("POSTGRES_PORT", "5432"),
+        dbname=os.getenv("POSTGRES_DB", "atlas"),
+        user=os.environ["POSTGRES_USER"],
+        password=password,
     )
-
 
 DATABASE_URL = get_database_url()
 REDPANDA_ADMIN_URL = os.getenv(

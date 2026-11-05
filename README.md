@@ -31,8 +31,8 @@ Latest verification:
 | Unique event IDs | 70 |
 | dbt fact records | 70 |
 | FastAPI summary records | 70 |
-| Spark input / output | 30 / 30 in the recorded Spark run |
-| Parquet upload | Successful |
+| Spark input / output | 70 / 70 |
+| Parquet upload | Refreshed 70-event dataset uploaded successfully |
 | dbt models | 3 successful |
 | dbt data-quality tests | 9 passed |
 | PostgreSQL / Redpanda / SeaweedFS | Healthy |

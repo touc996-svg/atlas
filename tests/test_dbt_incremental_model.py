@@ -19,12 +19,12 @@ def test_incremental_filter_uses_ingestion_time():
     assert "max(ingested_at)" in sql
 
 
-def test_overlap_window_defaults_to_48_hours():
+def test_overlap_window_defaults_to_2_hours():
     sql = MODEL.read_text().lower()
 
-    assert "atlas_incremental_lookback_hours" in sql
+    assert "atlas_incremental_lookback_hours', 2" in sql
     assert "make_interval" in sql
-    assert "48" in sql
+    assert "lookback_hours" in sql
 
 
 def test_existing_fact_columns_are_preserved():

@@ -48,7 +48,7 @@ jobs:
           POSTGRES_HOST: localhost
           POSTGRES_PORT: "5432"
           POSTGRES_DB: atlas_ci
-        run: PYTHONPATH=src pytest -q
+        run: PYTHONPATH=src:. python -m pytest -q
 
       - name: Check dependency consistency
         run: pip check

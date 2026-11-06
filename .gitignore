@@ -27,3 +27,8 @@ metastore_db/
 
 # Local upgrade backups
 .atlas-upgrade-backups/
+
+# Local editor and upgrade backups
+*.bak
+*.bak-*
+*.bak.*

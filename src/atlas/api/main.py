@@ -144,6 +144,53 @@ def health():
     }
 
 
+@app.get("/api/v1/pipeline/runs")
+def pipeline_runs(limit: int = Query(default=20, ge=1, le=100)):
+    """Return recent persisted pipeline runs."""
+    return query_db("""
+        SELECT run_id, status, started_at, finished_at,
+               input_records, output_records, quality_passed, error_message
+        FROM public.atlas_pipeline_runs
+        ORDER BY started_at DESC
+        LIMIT %s
+    """, (limit,))
+
+
+@app.get("/api/v1/pipeline/runs/{run_id}")
+def pipeline_run_detail(run_id: str):
+    """Return one run with its stage attempts and data-quality checks."""
+    from uuid import UUID
+
+    try:
+        parsed_run_id = str(UUID(run_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid pipeline run ID") from exc
+
+    runs = query_db("""
+        SELECT run_id, status, started_at, finished_at,
+               input_records, output_records, quality_passed, error_message
+        FROM public.atlas_pipeline_runs
+        WHERE run_id = %s
+    """, (parsed_run_id,))
+    if not runs:
+        raise HTTPException(status_code=404, detail="Pipeline run not found")
+
+    steps = query_db("""
+        SELECT step_name, attempt, status, started_at, finished_at,
+               duration_ms, exit_code, output_tail
+        FROM public.atlas_pipeline_steps
+        WHERE run_id = %s
+        ORDER BY step_id
+    """, (parsed_run_id,))
+    quality = query_db("""
+        SELECT check_name, status, observed_value, expected_value, details, created_at
+        FROM public.atlas_data_quality_results
+        WHERE run_id = %s
+        ORDER BY result_id
+    """, (parsed_run_id,))
+    return {"run": runs[0], "steps": steps, "quality_checks": quality}
+
+
 @app.get("/api/v1/analytics/summary")
 def analytics_summary():
     rows = query_db("""

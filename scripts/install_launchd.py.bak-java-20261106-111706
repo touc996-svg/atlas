@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Install or remove the per-user macOS launchd schedule for ATLAS."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import plistlib
+import subprocess
+import sys
+from pathlib import Path
+
+LABEL = "com.atlas.incremental-pipeline"
+
+
+def create_plist(project_root: Path, python_executable: Path, interval: int) -> dict:
+    scripts_dir = project_root / "scripts"
+    logs_dir = project_root / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    return {
+        "Label": LABEL,
+        "ProgramArguments": [
+            str(python_executable),
+            str(scripts_dir / "run_scheduled_pipeline.py"),
+        ],
+        "WorkingDirectory": str(project_root),
+        "RunAtLoad": True,
+        "StartInterval": interval,
+        "ProcessType": "Background",
+        "ThrottleInterval": 60,
+        "StandardOutPath": str(logs_dir / "atlas-launchd.stdout.log"),
+        "StandardErrorPath": str(logs_dir / "atlas-launchd.stderr.log"),
+        "EnvironmentVariables": {
+            "PYTHONPATH": str(project_root / "src"),
+            "PYTHONUNBUFFERED": "1",
+        },
+    }
+
+
+def launchctl(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["launchctl", *args],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--project-root", type=Path, default=Path.cwd())
+    parser.add_argument("--interval-seconds", type=int, default=None)
+    parser.add_argument("--uninstall", action="store_true")
+    args = parser.parse_args(argv)
+
+    project_root = args.project_root.expanduser().resolve()
+    if sys.platform != "darwin":
+        parser.error("This installer supports macOS launchd only.")
+    if not project_root.is_dir():
+        parser.error(f"Project root not found: {project_root}")
+
+    launch_agents = Path.home() / "Library" / "LaunchAgents"
+    plist_path = launch_agents / f"{LABEL}.plist"
+    domain = f"gui/{os.getuid()}"
+    service_target = f"{domain}/{LABEL}"
+
+    if args.uninstall:
+        launchctl("bootout", domain, str(plist_path))
+        plist_path.unlink(missing_ok=True)
+        print(f"Removed ATLAS launchd schedule: {plist_path}")
+        return 0
+
+    interval = args.interval_seconds or int(
+        os.getenv("ATLAS_SCHEDULE_INTERVAL_SECONDS", "1800")
+    )
+    if interval < 60:
+        parser.error("Schedule interval must be at least 60 seconds.")
+
+    venv_python = project_root / ".venv" / "bin" / "python"
+    python_executable = venv_python if venv_python.is_file() else Path(sys.executable).resolve()
+    runner = project_root / "scripts" / "run_scheduled_pipeline.py"
+    if not runner.is_file():
+        parser.error(f"Scheduler runner not found: {runner}")
+
+    plist_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = create_plist(project_root, python_executable, interval)
+    temp_path = plist_path.with_suffix(".plist.tmp")
+    temp_path.write_bytes(plistlib.dumps(payload))
+    temp_path.replace(plist_path)
+
+    # bootout is intentionally best-effort so reinstalling is idempotent.
+    launchctl("bootout", domain, str(plist_path))
+    enabled = launchctl("enable", service_target)
+    if enabled.returncode != 0:
+        print(enabled.stderr.strip(), file=sys.stderr)
+        return enabled.returncode
+
+    bootstrapped = launchctl("bootstrap", domain, str(plist_path))
+    if bootstrapped.returncode != 0:
+        print(bootstrapped.stderr.strip(), file=sys.stderr)
+        return bootstrapped.returncode
+
+    print("ATLAS launchd schedule installed.")
+    print(f"Project: {project_root}")
+    print(f"Python: {python_executable}")
+    print(f"Interval: {interval} seconds")
+    print(f"Label: {LABEL}")
+    print(f"Plist: {plist_path}")
+    print("The schedule runs immediately at load and then at the configured interval.")
+    print("Use --uninstall to remove it.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

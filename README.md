@@ -4,7 +4,7 @@ An end-to-end local data engineering platform demonstrating event streaming, dat
 
 ## Architecture
 
-Python Producer → Redpanda/Kafka → PostgreSQL → Spark/PySpark → Partitioned Parquet → SeaweedFS S3 Data Lake
+Python Producer → Redpanda/Kafka → PostgreSQL → Spark JDBC / PySpark → Partitioned Parquet → SeaweedFS S3 Data Lake
 
 PostgreSQL → dbt staging/fact/dimension models → FastAPI → Streamlit/Plotly Dashboard
 
@@ -21,22 +21,41 @@ PostgreSQL → dbt staging/fact/dimension models → FastAPI → Streamlit/Plotl
 - Streamlit / Plotly
 - Docker Compose
 
-## Verified local demonstration
+## Verified local demonstration — November 6, 2026
 
-Latest verification:
+Latest successful automated macOS LaunchAgent execution:
 
-| Metric | Result |
+| Metric | Verified result |
 |---|---:|
-| PostgreSQL raw events | 70 |
-| Unique event IDs | 70 |
-| dbt fact records | 70 |
-| FastAPI summary records | 70 |
-| Spark input / output | 70 / 70 |
-| Parquet upload | Refreshed 70-event dataset uploaded successfully |
-| dbt models | 3 successful |
-| dbt data-quality tests | 9 passed |
-| PostgreSQL / Redpanda / SeaweedFS | Healthy |
+| End-to-end pipeline | SUCCESS |
+| Total execution time | 65.449 seconds |
+| Spark transformation | SUCCESS |
+| Spark execution time | 43.083 seconds |
+| S3 Parquet files discovered | 2 |
+| New S3 objects uploaded | 0 |
+| Existing S3 objects skipped | 2 |
+| dbt models | 3/3 successful |
+| dbt data-quality tests | 9/9 passed |
+| Incremental fact rows inserted | 45 |
+| Pipeline exit code | 0 |
 
+The S3 publisher skipped existing objects, demonstrating idempotent
+publishing on the verified run. Spark reads PostgreSQL through JDBC,
+and dbt builds staging, dimension, and incremental fact models.
+
+The pipeline supports persisted run metadata, stage-level execution
+tracking, retries, data-quality gates, incremental processing, and
+failure status reporting.
+
+## Automated execution
+
+A per-user macOS LaunchAgent runs the incremental pipeline immediately
+at load and every 30 minutes thereafter. Its environment explicitly
+provides Java 17, the project virtual environment, and Python path.
+
+Execution status and logs are stored locally under
+`data/processed/scheduler/`. The machine-specific LaunchAgent plist
+is not part of the repository.
 
 ## Local setup
 

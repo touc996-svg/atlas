@@ -24,3 +24,6 @@ metastore_db/
 
 .agents/
 .claude/
+
+# Local upgrade backups
+.atlas-upgrade-backups/

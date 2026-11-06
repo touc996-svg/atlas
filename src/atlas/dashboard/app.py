@@ -205,6 +205,7 @@ def load_data():
         "types": "/api/v1/analytics/event-types",
         "daily": "/api/v1/analytics/daily",
         "events": "/api/v1/events?limit=100",
+        "pipeline_runs": "/api/v1/pipeline/runs?limit=50",
     }
 
     for key, endpoint in endpoints.items():
@@ -224,6 +225,8 @@ types = data.get("types", [])
 daily = data.get("daily", [])
 events = data.get("events", [])
 telemetry = data.get("telemetry", {})
+pipeline_runs = data.get("pipeline_runs", [])
+services_health = health.get("services", {})
 services_health = health.get("services", {})
 
 api_online = services_health.get("api", {}).get("status") == "online"
@@ -251,7 +254,9 @@ with st.sidebar:
             "Command Center",
             "Data Explorer",
             "Event Intelligence",
+            "Pipeline Operations",
             "System Health",
+            "Pipeline System Health",
         ],
         label_visibility="visible",
     )
@@ -563,6 +568,80 @@ if page == "Command Center":
         st.info("No events available.")
 
 # ---------------------------------------------------------
+# PIPELINE OPERATIONS
+# ---------------------------------------------------------
+
+elif page == "Pipeline Operations":
+    panel_heading(
+        "PIPELINE OPERATIONS",
+        "ORCHESTRATED SPARK RUNS, STAGE RETRIES AND DATA-QUALITY GATES",
+    )
+
+    if not pipeline_runs:
+        st.info(
+            "No pipeline runs are recorded yet. Start an orchestration run with "
+            "`PYTHONPATH=src python -m atlas.processing.pipeline_runner`."
+        )
+    else:
+        runs_df = pd.DataFrame(pipeline_runs)
+        successful = int((runs_df["status"] == "SUCCESS").sum()) if "status" in runs_df else 0
+        failed = int((runs_df["status"] == "FAILED").sum()) if "status" in runs_df else 0
+        latest = runs_df.iloc[0]
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            metric_card("RECENT RUNS", f"{len(runs_df):,}", "Most recent 50 pipeline runs")
+        with c2:
+            metric_card("SUCCEEDED", f"{successful:,}", "Within the displayed run history", "#45E0B0")
+        with c3:
+            metric_card("FAILED", f"{failed:,}", "Within the displayed run history", "#F87171" if failed else "#45E0B0")
+        with c4:
+            metric_card("LATEST STATUS", str(latest.get("status", "UNKNOWN")), str(latest.get("started_at", "")), "#45E0B0" if latest.get("status") == "SUCCESS" else "#F6B96B")
+
+        st.markdown("---")
+        panel_heading("PIPELINE RUN HISTORY", "DURABLE RUN AND STAGE METADATA FROM POSTGRESQL")
+        visible_columns = [
+            name for name in [
+                "run_id", "status", "started_at", "finished_at",
+                "input_records", "output_records", "quality_passed",
+            ] if name in runs_df.columns
+        ]
+        st.dataframe(runs_df[visible_columns], use_container_width=True, hide_index=True)
+
+        run_ids = [str(value) for value in runs_df["run_id"].tolist()]
+        selected_run = st.selectbox(
+            "INSPECT PIPELINE RUN",
+            run_ids,
+            format_func=lambda value: f"{value[:8]}…  |  {next((r.get('status', 'UNKNOWN') for r in pipeline_runs if str(r.get('run_id')) == value), 'UNKNOWN')}",
+        )
+        try:
+            detail = fetch_endpoint(f"/api/v1/pipeline/runs/{selected_run}")
+            steps = detail.get("steps", [])
+            checks = detail.get("quality_checks", [])
+            left, right = st.columns(2)
+            with left:
+                panel_heading("EXECUTION STAGES", "EACH RETRY IS RECORDED AS A SEPARATE ATTEMPT")
+                if steps:
+                    st.dataframe(pd.DataFrame(steps), use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No stage records found for this run.")
+            with right:
+                panel_heading("DATA-QUALITY GATES", "SPARK VALIDATION RESULTS FOR THIS RUN")
+                if checks:
+                    st.dataframe(pd.DataFrame(checks), use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No quality checks were persisted for this run.")
+            run_error = detail.get("run", {}).get("error_message")
+            if run_error:
+                st.error(run_error)
+        except Exception as exc:
+            st.warning(f"Could not load pipeline run details: {exc}")
+
+
+# ---------------------------------------------------------
+# DATA EXPLORER
+# ---------------------------------------------------------
+# ---------------------------------------------------------
 # DATA EXPLORER
 # ---------------------------------------------------------
 
@@ -634,8 +713,11 @@ elif page == "Event Intelligence":
 # SYSTEM HEALTH
 # ---------------------------------------------------------
 
-elif page == "System Health":
-    panel_heading("SYSTEM HEALTH", "BACKEND CONNECTIVITY AND DATA QUALITY")
+elif page in ("System Health", "Pipeline System Health"):
+    panel_heading(
+        "PIPELINE SYSTEM HEALTH" if page == "Pipeline System Health" else "SYSTEM HEALTH",
+        "BACKEND CONNECTIVITY AND DATA QUALITY",
+    )
 
     c1, c2 = st.columns(2)
 

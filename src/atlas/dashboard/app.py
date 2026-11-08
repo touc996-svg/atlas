@@ -9,6 +9,11 @@ import streamlit as st
 
 API_URL = os.getenv("ATLAS_API_URL", "http://127.0.0.1:8000")
 
+
+def api_headers() -> dict[str, str]:
+    key = os.getenv("ATLAS_API_KEY", "").strip()
+    return {"X-API-Key": key} if key else {}
+
 st.set_page_config(
     page_title="ATLAS | Command Center",
     page_icon="◈",
@@ -188,6 +193,7 @@ footer {visibility: hidden;}
 def fetch_endpoint(endpoint):
     response = requests.get(
         f"{API_URL}{endpoint}",
+        headers=api_headers(),
         timeout=5,
     )
     response.raise_for_status()
@@ -912,7 +918,11 @@ def render_dashboard():
             "/api/v1/events",
         ]:
             try:
-                response = requests.get(API_URL + endpoint, timeout=5)
+                response = requests.get(
+                API_URL + endpoint,
+                headers=api_headers(),
+                timeout=5,
+            )
                 st.write(
                     f"{'🟢' if response.ok else '🔴'}  `{endpoint}` — HTTP {response.status_code}"
                 )

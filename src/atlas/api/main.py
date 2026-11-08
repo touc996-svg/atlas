@@ -1,14 +1,17 @@
 import os
 import time
 import json
+import hmac
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from urllib.request import Request, urlopen
+from urllib.request import Request as URLRequest, urlopen
 from urllib.error import URLError, HTTPError
 
 import psycopg
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 
 
 def get_database_url() -> str:
@@ -38,11 +41,56 @@ S3_HEALTH_URL = os.getenv(
     "S3_HEALTH_URL", "http://localhost:9000/minio/health/live"
 )
 
+
+
+def validate_api_security_config() -> None:
+    """Require a strong key when ATLAS runs in production."""
+    environment = os.getenv("ATLAS_ENV", "development").strip().lower()
+    api_key = os.getenv("ATLAS_API_KEY", "").strip()
+
+    if api_key and len(api_key) < 32:
+        raise RuntimeError("ATLAS_API_KEY must contain at least 32 characters.")
+
+    if environment in {"production", "prod"} and not api_key:
+        raise RuntimeError("ATLAS_API_KEY is required in production.")
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    validate_api_security_config()
+    yield
+
 app = FastAPI(
     title="ATLAS Analytics API",
     description="Analytics and operational telemetry API for ATLAS.",
     version="1.2.0",
+    lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def api_key_authentication(request: Request, call_next):
+    """Require X-API-Key for private analytics and ingestion endpoints."""
+    if request.url.path.startswith("/api/v1/"):
+        environment = os.getenv("ATLAS_ENV", "development").strip().lower()
+        configured_key = os.getenv("ATLAS_API_KEY", "").strip()
+        supplied_key = request.headers.get("X-API-Key", "")
+
+        if not configured_key and environment in {"production", "prod"}:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "API authentication is not configured."},
+            )
+
+        if configured_key and not hmac.compare_digest(supplied_key, configured_key):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing or invalid API key."},
+                headers={"WWW-Authenticate": "ApiKey"},
+            )
+
+    return await call_next(request)
+
 
 
 def query_db(sql: str, params: tuple = ()):
@@ -80,8 +128,8 @@ def check_postgres():
 def check_http_service(url: str, expected_status: str | None = None):
     started = time.perf_counter()
     try:
-        request = Request(url, headers={"User-Agent": "ATLAS-Health-Check"})
-        with urlopen(request, timeout=2) as response:
+        request = URLRequest(url, headers={"User-Agent": "ATLAS-Health-Check"})
+        with urlopen(request, timeout=5) as response:
             body = response.read(4096)
             if response.status != 200:
                 raise RuntimeError("Unexpected HTTP status")

@@ -64,6 +64,8 @@ services:
     container_name: atlas-api
     restart: unless-stopped
     environment:
+      ATLAS_ENV: ${ATLAS_ENV:-development}
+      ATLAS_API_KEY: ${ATLAS_API_KEY:-}
       POSTGRES_USER: atlas
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_HOST: postgres
@@ -88,6 +90,8 @@ services:
     container_name: atlas-dashboard
     restart: unless-stopped
     environment:
+      ATLAS_ENV: ${ATLAS_ENV:-development}
+      ATLAS_API_KEY: ${ATLAS_API_KEY:-}
       ATLAS_API_URL: http://api:8000
     ports:
       - "127.0.0.1:18501:8501"

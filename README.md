@@ -124,10 +124,10 @@ Dashboard: `http://localhost:8501`
 ## Current limitations
 
 - Demo events are synthetic.
-- Dashboard refresh is user-triggered and briefly cached; continuous live streaming updates are not yet implemented.
+- Dashboard analytics refresh automatically every 30 seconds while the browser session is active.
 - Throughput metrics are derived from PostgreSQL event timestamps, not native broker measurements.
 - Spark execution history and host resource utilization are not yet monitored.
-- Authentication, role-based access control, TLS, production secrets management and cloud deployment remain future work.
+- API key authentication protects private API endpoints. Role-based access control, TLS, managed production secrets and cloud deployment remain future work.
 
 ## Ingestion observability
 
@@ -156,6 +156,18 @@ PYTHONPATH=src python -m atlas.ingestion.replay --since 2026-11-01T00:00:00Z --u
 ```
 
 The dashboard displays replay status and audit metadata. Raw quarantined message bodies are not returned by the API. The replay CLI requires the same PostgreSQL and Kafka environment configuration as the ingestion pipeline.
+
+## API authentication
+
+ATLAS accepts an `X-API-Key` header on all `/api/v1/*` endpoints.
+
+- Local development without a key remains supported.
+- When a key is configured, private API endpoints require the matching header.
+- Production mode requires a key of at least 32 characters.
+- The dashboard sends the configured key automatically.
+- `/`, `/health`, and API documentation remain public for health checks and diagnostics.
+
+Generate a key with `openssl rand -hex 32` and store it in the local `.env` file as `ATLAS_API_KEY`. Set `ATLAS_ENV=production` for production. Never commit `.env` or expose the key in source code or logs.
 
 ## Security
 

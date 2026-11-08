@@ -8,6 +8,9 @@ version = "0.1.0"
 description = "Event-driven data lakehouse and analytics platform"
 requires-python = ">=3.12"
 
+[project.scripts]
+atlas-replay-dlq = "atlas.ingestion.replay:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 

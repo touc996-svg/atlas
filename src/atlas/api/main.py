@@ -338,3 +338,32 @@ def ingestion_rejections_by_reason(
         ORDER BY rejected_events DESC, latest_rejection_at DESC
         LIMIT %s
     """, (limit,))
+
+
+@app.get("/api/v1/ingestion/replay-summary")
+def ingestion_replay_summary():
+    """Return replay outcome counts without exposing quarantined event bodies."""
+    rows = query_db("""
+        SELECT
+            COUNT(*)::BIGINT AS total_attempts,
+            COUNT(*) FILTER (WHERE status = 'PUBLISHED')::BIGINT AS published,
+            COUNT(*) FILTER (WHERE status = 'FAILED')::BIGINT AS failed,
+            COUNT(*) FILTER (WHERE status = 'PUBLISHING')::BIGINT AS publishing,
+            MAX(finished_at) AS latest_finished_at
+        FROM public.atlas_event_replay_audit
+    """)
+    return rows[0]
+
+
+@app.get("/api/v1/ingestion/replays")
+def ingestion_replays(limit: int = Query(default=50, ge=1, le=100)):
+    """List replay audit metadata; raw Kafka values are never returned."""
+    return query_db("""
+        SELECT
+            replay_id, source_topic, source_partition, source_offset,
+            target_topic, target_partition, target_offset,
+            status, attempt, error_message, started_at, finished_at
+        FROM public.atlas_event_replay_audit
+        ORDER BY started_at DESC
+        LIMIT %s
+    """, (limit,))

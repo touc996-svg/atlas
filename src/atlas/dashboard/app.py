@@ -209,6 +209,8 @@ def load_data():
         "ingestion_summary": "/api/v1/ingestion/summary",
         "rejections": "/api/v1/ingestion/rejections?limit=50",
         "rejection_reasons": "/api/v1/ingestion/rejections/by-reason?limit=20",
+        "replay_summary": "/api/v1/ingestion/replay-summary",
+        "replays": "/api/v1/ingestion/replays?limit=50",
     }
 
     for key, endpoint in endpoints.items():
@@ -232,6 +234,8 @@ pipeline_runs = data.get("pipeline_runs", [])
 ingestion_summary = data.get("ingestion_summary", {})
 rejections = data.get("rejections", [])
 rejection_reasons = data.get("rejection_reasons", [])
+replay_summary = data.get("replay_summary", {})
+replays = data.get("replays", [])
 services_health = health.get("services", {})
 services_health = health.get("services", {})
 
@@ -262,6 +266,7 @@ with st.sidebar:
             "Event Intelligence",
             "Pipeline Operations",
             "Ingestion Health",
+            "Event Recovery",
             "System Health",
             "Pipeline System Health",
         ],
@@ -659,6 +664,70 @@ elif page == "Ingestion Health":
             st.dataframe(rejected_df[safe_columns], use_container_width=True, hide_index=True)
         else:
             st.info("No rejected records are currently available.")
+
+elif page == "Event Recovery":
+    panel_heading(
+        "EVENT RECOVERY",
+        "CONTROLLED DEAD-LETTER REPLAY WITH DURABLE AUDIT HISTORY",
+    )
+
+    if replay_summary:
+        total_attempts = int(replay_summary.get("total_attempts") or 0)
+        published = int(replay_summary.get("published") or 0)
+        failed = int(replay_summary.get("failed") or 0)
+        publishing = int(replay_summary.get("publishing") or 0)
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            metric_card("REPLAY ATTEMPTS", f"{total_attempts:,}", "Recorded audit entries")
+        with c2:
+            metric_card("PUBLISHED", f"{published:,}", "Successfully sent to Kafka", "#45E0B0")
+        with c3:
+            metric_card("FAILED", f"{failed:,}", "Eligible for a later retry", "#F87171" if failed else "#45E0B0")
+        with c4:
+            metric_card("IN PROGRESS", f"{publishing:,}", "Currently publishing", "#F6B96B")
+    else:
+        st.info(
+            "No replay audit table is available yet. Run the replay CLI once in dry-run "
+            "mode to initialize the audit schema."
+        )
+
+    st.markdown("---")
+    panel_heading("SAFE REPLAY WORKFLOW", "PREVIEW FIRST, THEN PUBLISH A CONTROLLED BATCH")
+    st.markdown(
+        "The original quarantine record is retained. Replay publishes the original "
+        "message bytes to Kafka and records source and destination offsets. Already "
+        "published records are skipped on subsequent runs."
+    )
+    st.code(
+        "PYTHONPATH=src python -m atlas.ingestion.replay --dry-run --limit 100",
+        language="bash",
+    )
+    st.caption("After reviewing the candidate count, run a bounded replay:")
+    st.code(
+        "PYTHONPATH=src python -m atlas.ingestion.replay --limit 100",
+        language="bash",
+    )
+    st.caption("Historical quarantine window (UTC shown; bounds require a timezone):")
+    st.code(
+        "PYTHONPATH=src python -m atlas.ingestion.replay "
+        "--since 2026-11-01T00:00:00Z --until 2026-11-08T00:00:00Z --dry-run",
+        language="bash",
+    )
+
+    st.markdown("---")
+    panel_heading("REPLAY AUDIT HISTORY", "SOURCE AND DESTINATION KAFKA COORDINATES")
+    if replays:
+        replay_df = pd.DataFrame(replays)
+        visible = [
+            name for name in [
+                "started_at", "status", "attempt", "source_topic",
+                "source_partition", "source_offset", "target_topic",
+                "target_partition", "target_offset", "error_message",
+            ] if name in replay_df.columns
+        ]
+        st.dataframe(replay_df[visible], use_container_width=True, hide_index=True)
+    else:
+        st.info("No replay attempts have been recorded yet.")
 
 elif page == "Pipeline Operations":
     panel_heading(

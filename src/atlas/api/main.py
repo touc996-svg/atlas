@@ -41,7 +41,7 @@ S3_HEALTH_URL = os.getenv(
 app = FastAPI(
     title="ATLAS Analytics API",
     description="Analytics and operational telemetry API for ATLAS.",
-    version="1.1.0",
+    version="1.2.0",
 )
 
 
@@ -261,5 +261,109 @@ def recent_events(limit: int = Query(default=20, ge=1, le=100)):
             payload, kafka_partition, kafka_offset, ingested_at
         FROM analytics.fct_atlas_events
         ORDER BY event_timestamp DESC
+        LIMIT %s
+    """, (limit,))
+
+
+@app.get("/api/v1/ingestion/summary")
+def ingestion_summary():
+    """Return accepted/rejected ingestion totals and recent quarantine activity."""
+    rows = query_db("""
+        WITH accepted AS (
+            SELECT COUNT(*)::BIGINT AS accepted_events
+            FROM public.atlas_events
+        ),
+        rejected AS (
+            SELECT
+                COUNT(*)::BIGINT AS rejected_events,
+                COUNT(*) FILTER (
+                    WHERE rejected_at >= NOW() - INTERVAL '1 hour'
+                )::BIGINT AS rejected_last_hour,
+                COUNT(*) FILTER (
+                    WHERE rejected_at >= NOW() - INTERVAL '24 hours'
+                )::BIGINT AS rejected_last_24_hours,
+                MAX(rejected_at) AS latest_rejection_at
+            FROM public.atlas_event_rejections
+        )
+        SELECT
+            accepted.accepted_events,
+            rejected.rejected_events,
+            rejected.rejected_last_hour,
+            rejected.rejected_last_24_hours,
+            rejected.latest_rejection_at,
+            CASE
+                WHEN accepted.accepted_events + rejected.rejected_events = 0
+                    THEN 0.0
+                ELSE ROUND(
+                    rejected.rejected_events * 100.0
+                    / (accepted.accepted_events + rejected.rejected_events),
+                    2
+                )
+            END AS rejection_rate_percent
+        FROM accepted
+        CROSS JOIN rejected
+    """)
+    return rows[0]
+
+
+@app.get("/api/v1/ingestion/rejections")
+def ingestion_rejections(limit: int = Query(default=50, ge=1, le=100)):
+    """List quarantined records without returning their raw message payloads."""
+    return query_db("""
+        SELECT
+            topic,
+            kafka_partition,
+            kafka_offset,
+            error_reason,
+            rejected_at,
+            octet_length(raw_value) AS raw_value_bytes
+        FROM public.atlas_event_rejections
+        ORDER BY rejected_at DESC
+        LIMIT %s
+    """, (limit,))
+
+
+@app.get("/api/v1/ingestion/rejections/by-reason")
+def ingestion_rejections_by_reason(
+    limit: int = Query(default=20, ge=1, le=100)
+):
+    """Aggregate quarantined records by validation or processing reason."""
+    return query_db("""
+        SELECT
+            error_reason,
+            COUNT(*)::BIGINT AS rejected_events,
+            MAX(rejected_at) AS latest_rejection_at
+        FROM public.atlas_event_rejections
+        GROUP BY error_reason
+        ORDER BY rejected_events DESC, latest_rejection_at DESC
+        LIMIT %s
+    """, (limit,))
+
+
+@app.get("/api/v1/ingestion/replay-summary")
+def ingestion_replay_summary():
+    """Return replay outcome counts without exposing quarantined event bodies."""
+    rows = query_db("""
+        SELECT
+            COUNT(*)::BIGINT AS total_attempts,
+            COUNT(*) FILTER (WHERE status = 'PUBLISHED')::BIGINT AS published,
+            COUNT(*) FILTER (WHERE status = 'FAILED')::BIGINT AS failed,
+            COUNT(*) FILTER (WHERE status = 'PUBLISHING')::BIGINT AS publishing,
+            MAX(finished_at) AS latest_finished_at
+        FROM public.atlas_event_replay_audit
+    """)
+    return rows[0]
+
+
+@app.get("/api/v1/ingestion/replays")
+def ingestion_replays(limit: int = Query(default=50, ge=1, le=100)):
+    """List replay audit metadata; raw Kafka values are never returned."""
+    return query_db("""
+        SELECT
+            replay_id, source_topic, source_partition, source_offset,
+            target_topic, target_partition, target_offset,
+            status, attempt, error_message, started_at, finished_at
+        FROM public.atlas_event_replay_audit
+        ORDER BY started_at DESC
         LIMIT %s
     """, (limit,))

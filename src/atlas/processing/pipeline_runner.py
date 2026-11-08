@@ -38,12 +38,24 @@ def validate_manifest(manifest: dict[str, Any]) -> tuple[bool, str]:
 
 
 def redact_output(value: str) -> str:
-    """Avoid persisting common secret assignments in pipeline step output."""
-    return re.sub(
-        r"(?i)(password|secret|token|aws_access_key_id)(\s*[:=]\s*)[^\s,;]+",
-        r"\1\2[REDACTED]",
+    """Redact common secrets before stage output is logged or persisted."""
+    assignment_pattern = (
+        r"(?i)\b([A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET(?:[_-]ACCESS[_-]?KEY)?|"
+        r"TOKEN|API[_-]?KEY|ACCESS[_-]?KEY(?:[_-]?ID)?|CLIENT[_-]?SECRET))"
+        r"(\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+    )
+    value = re.sub(assignment_pattern, r"\1\2[REDACTED]", value)
+    value = re.sub(
+        r"(?i)\b((?:postgres(?:ql)?|mysql|redis)://[^:/@\s]+:)[^@/\s]+(@)",
+        r"\1[REDACTED]\2",
         value,
     )
+    value = re.sub(
+        r"(?i)\b(authorization\s*:\s*bearer)\s+[^\s,;]+",
+        r"\1 [REDACTED]",
+        value,
+    )
+    return value
 
 
 def execute_stage(

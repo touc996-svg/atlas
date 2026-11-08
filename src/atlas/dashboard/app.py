@@ -206,6 +206,11 @@ def load_data():
         "daily": "/api/v1/analytics/daily",
         "events": "/api/v1/events?limit=100",
         "pipeline_runs": "/api/v1/pipeline/runs?limit=50",
+        "ingestion_summary": "/api/v1/ingestion/summary",
+        "rejections": "/api/v1/ingestion/rejections?limit=50",
+        "rejection_reasons": "/api/v1/ingestion/rejections/by-reason?limit=20",
+        "replay_summary": "/api/v1/ingestion/replay-summary",
+        "replays": "/api/v1/ingestion/replays?limit=50",
     }
 
     for key, endpoint in endpoints.items():
@@ -226,6 +231,11 @@ daily = data.get("daily", [])
 events = data.get("events", [])
 telemetry = data.get("telemetry", {})
 pipeline_runs = data.get("pipeline_runs", [])
+ingestion_summary = data.get("ingestion_summary", {})
+rejections = data.get("rejections", [])
+rejection_reasons = data.get("rejection_reasons", [])
+replay_summary = data.get("replay_summary", {})
+replays = data.get("replays", [])
 services_health = health.get("services", {})
 services_health = health.get("services", {})
 
@@ -255,6 +265,8 @@ with st.sidebar:
             "Data Explorer",
             "Event Intelligence",
             "Pipeline Operations",
+            "Ingestion Health",
+            "Event Recovery",
             "System Health",
             "Pipeline System Health",
         ],
@@ -570,6 +582,152 @@ if page == "Command Center":
 # ---------------------------------------------------------
 # PIPELINE OPERATIONS
 # ---------------------------------------------------------
+
+elif page == "Ingestion Health":
+    panel_heading(
+        "INGESTION HEALTH",
+        "ACCEPTED EVENTS, QUARANTINED RECORDS AND VALIDATION FAILURE PATTERNS",
+    )
+
+    if not ingestion_summary:
+        st.warning(
+            "Ingestion telemetry is unavailable. Confirm that the PostgreSQL sink "
+            "has initialized its event and rejection tables."
+        )
+    else:
+        accepted = int(ingestion_summary.get("accepted_events") or 0)
+        rejected = int(ingestion_summary.get("rejected_events") or 0)
+        rejected_hour = int(ingestion_summary.get("rejected_last_hour") or 0)
+        rejected_day = int(ingestion_summary.get("rejected_last_24_hours") or 0)
+        rejection_rate = float(ingestion_summary.get("rejection_rate_percent") or 0)
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            metric_card("ACCEPTED EVENTS", f"{accepted:,}", "Persisted in PostgreSQL", "#45E0B0")
+        with c2:
+            metric_card("QUARANTINED EVENTS", f"{rejected:,}", "Durably rejected records", "#F87171" if rejected else "#45E0B0")
+        with c3:
+            metric_card("REJECTED / LAST HOUR", f"{rejected_hour:,}", "Recent validation failures", "#F6B96B")
+        with c4:
+            metric_card("REJECTION RATE", f"{rejection_rate:.2f}%", f"{rejected_day:,} rejected in 24 hours", "#A78BFA")
+
+        st.markdown("---")
+        left, right = st.columns([1.1, 1])
+
+        with left:
+            panel_heading("REJECTION PATTERNS", "MOST FREQUENT QUARANTINE REASONS")
+            reasons_df = pd.DataFrame(rejection_reasons)
+            if not reasons_df.empty:
+                reasons_df = reasons_df.sort_values("rejected_events", ascending=True)
+                fig = px.bar(
+                    reasons_df.tail(12),
+                    x="rejected_events",
+                    y="error_reason",
+                    orientation="h",
+                    labels={"rejected_events": "Rejected events", "error_reason": "Reason"},
+                )
+                fig.update_layout(
+                    height=340,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#AAB7CA"),
+                    margin=dict(l=10, r=10, t=15, b=10),
+                    xaxis=dict(showgrid=True, gridcolor="rgba(148,163,184,.10)"),
+                    yaxis=dict(showgrid=False),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No quarantined events have been recorded.")
+
+        with right:
+            panel_heading("INGESTION GUIDANCE", "HOW ATLAS HANDLES INVALID EVENTS")
+            st.markdown(
+                "- Valid events are stored idempotently by `event_id`.\n"
+                "- Invalid messages are written to a durable quarantine table.\n"
+                "- Kafka offsets advance only after the database transaction.\n"
+                "- Duplicate deliveries do not create duplicate event rows.\n"
+                "- Raw rejected payloads are not exposed by the analytics API."
+            )
+            latest_rejection = ingestion_summary.get("latest_rejection_at")
+            st.caption(f"Latest quarantine record: {latest_rejection or 'None recorded'}")
+
+        st.markdown("---")
+        panel_heading("RECENT QUARANTINE", "SAFE METADATA ONLY — RAW MESSAGE CONTENT IS NOT EXPOSED")
+        if rejections:
+            rejected_df = pd.DataFrame(rejections)
+            safe_columns = [
+                name for name in [
+                    "rejected_at", "topic", "kafka_partition", "kafka_offset",
+                    "error_reason", "raw_value_bytes",
+                ] if name in rejected_df.columns
+            ]
+            st.dataframe(rejected_df[safe_columns], use_container_width=True, hide_index=True)
+        else:
+            st.info("No rejected records are currently available.")
+
+elif page == "Event Recovery":
+    panel_heading(
+        "EVENT RECOVERY",
+        "CONTROLLED DEAD-LETTER REPLAY WITH DURABLE AUDIT HISTORY",
+    )
+
+    if replay_summary:
+        total_attempts = int(replay_summary.get("total_attempts") or 0)
+        published = int(replay_summary.get("published") or 0)
+        failed = int(replay_summary.get("failed") or 0)
+        publishing = int(replay_summary.get("publishing") or 0)
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            metric_card("REPLAY ATTEMPTS", f"{total_attempts:,}", "Recorded audit entries")
+        with c2:
+            metric_card("PUBLISHED", f"{published:,}", "Successfully sent to Kafka", "#45E0B0")
+        with c3:
+            metric_card("FAILED", f"{failed:,}", "Eligible for a later retry", "#F87171" if failed else "#45E0B0")
+        with c4:
+            metric_card("IN PROGRESS", f"{publishing:,}", "Currently publishing", "#F6B96B")
+    else:
+        st.info(
+            "No replay audit table is available yet. Run the replay CLI once in dry-run "
+            "mode to initialize the audit schema."
+        )
+
+    st.markdown("---")
+    panel_heading("SAFE REPLAY WORKFLOW", "PREVIEW FIRST, THEN PUBLISH A CONTROLLED BATCH")
+    st.markdown(
+        "The original quarantine record is retained. Replay publishes the original "
+        "message bytes to Kafka and records source and destination offsets. Already "
+        "published records are skipped on subsequent runs."
+    )
+    st.code(
+        "PYTHONPATH=src python -m atlas.ingestion.replay --dry-run --limit 100",
+        language="bash",
+    )
+    st.caption("After reviewing the candidate count, run a bounded replay:")
+    st.code(
+        "PYTHONPATH=src python -m atlas.ingestion.replay --limit 100",
+        language="bash",
+    )
+    st.caption("Historical quarantine window (UTC shown; bounds require a timezone):")
+    st.code(
+        "PYTHONPATH=src python -m atlas.ingestion.replay "
+        "--since 2026-11-01T00:00:00Z --until 2026-11-08T00:00:00Z --dry-run",
+        language="bash",
+    )
+
+    st.markdown("---")
+    panel_heading("REPLAY AUDIT HISTORY", "SOURCE AND DESTINATION KAFKA COORDINATES")
+    if replays:
+        replay_df = pd.DataFrame(replays)
+        visible = [
+            name for name in [
+                "started_at", "status", "attempt", "source_topic",
+                "source_partition", "source_offset", "target_topic",
+                "target_partition", "target_offset", "error_message",
+            ] if name in replay_df.columns
+        ]
+        st.dataframe(replay_df[visible], use_container_width=True, hide_index=True)
+    else:
+        st.info("No replay attempts have been recorded yet.")
 
 elif page == "Pipeline Operations":
     panel_heading(

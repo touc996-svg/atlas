@@ -120,3 +120,24 @@ def test_execute_stage_fails_after_attempt_limit(monkeypatch):
 
     store.finish_step.assert_called_once()
     assert store.finish_step.call_args.kwargs["status"] == "FAILED"
+
+
+
+def test_redact_output_handles_quoted_secrets_urls_and_bearer_tokens():
+    output = (
+        'POSTGRES_PASSWORD="secret value with spaces" '
+        'AWS_SECRET_ACCESS_KEY=aws-secret '
+        'Authorization: Bearer bearer-token '
+        'postgresql://atlas:database-password@localhost:5432/atlas'
+    )
+    redacted = redact_output(output)
+    for secret in (
+        "secret value with spaces", "aws-secret", "bearer-token", "database-password"
+    ):
+        assert secret not in redacted
+    assert redacted.count("[REDACTED]") == 4
+
+
+def test_redact_output_preserves_non_secret_diagnostic_text():
+    output = "stage=publish_s3 status=FAILED exit_code=2"
+    assert redact_output(output) == output

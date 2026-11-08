@@ -206,6 +206,9 @@ def load_data():
         "daily": "/api/v1/analytics/daily",
         "events": "/api/v1/events?limit=100",
         "pipeline_runs": "/api/v1/pipeline/runs?limit=50",
+        "ingestion_summary": "/api/v1/ingestion/summary",
+        "rejections": "/api/v1/ingestion/rejections?limit=50",
+        "rejection_reasons": "/api/v1/ingestion/rejections/by-reason?limit=20",
     }
 
     for key, endpoint in endpoints.items():
@@ -226,6 +229,9 @@ daily = data.get("daily", [])
 events = data.get("events", [])
 telemetry = data.get("telemetry", {})
 pipeline_runs = data.get("pipeline_runs", [])
+ingestion_summary = data.get("ingestion_summary", {})
+rejections = data.get("rejections", [])
+rejection_reasons = data.get("rejection_reasons", [])
 services_health = health.get("services", {})
 services_health = health.get("services", {})
 
@@ -255,6 +261,7 @@ with st.sidebar:
             "Data Explorer",
             "Event Intelligence",
             "Pipeline Operations",
+            "Ingestion Health",
             "System Health",
             "Pipeline System Health",
         ],
@@ -570,6 +577,88 @@ if page == "Command Center":
 # ---------------------------------------------------------
 # PIPELINE OPERATIONS
 # ---------------------------------------------------------
+
+elif page == "Ingestion Health":
+    panel_heading(
+        "INGESTION HEALTH",
+        "ACCEPTED EVENTS, QUARANTINED RECORDS AND VALIDATION FAILURE PATTERNS",
+    )
+
+    if not ingestion_summary:
+        st.warning(
+            "Ingestion telemetry is unavailable. Confirm that the PostgreSQL sink "
+            "has initialized its event and rejection tables."
+        )
+    else:
+        accepted = int(ingestion_summary.get("accepted_events") or 0)
+        rejected = int(ingestion_summary.get("rejected_events") or 0)
+        rejected_hour = int(ingestion_summary.get("rejected_last_hour") or 0)
+        rejected_day = int(ingestion_summary.get("rejected_last_24_hours") or 0)
+        rejection_rate = float(ingestion_summary.get("rejection_rate_percent") or 0)
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            metric_card("ACCEPTED EVENTS", f"{accepted:,}", "Persisted in PostgreSQL", "#45E0B0")
+        with c2:
+            metric_card("QUARANTINED EVENTS", f"{rejected:,}", "Durably rejected records", "#F87171" if rejected else "#45E0B0")
+        with c3:
+            metric_card("REJECTED / LAST HOUR", f"{rejected_hour:,}", "Recent validation failures", "#F6B96B")
+        with c4:
+            metric_card("REJECTION RATE", f"{rejection_rate:.2f}%", f"{rejected_day:,} rejected in 24 hours", "#A78BFA")
+
+        st.markdown("---")
+        left, right = st.columns([1.1, 1])
+
+        with left:
+            panel_heading("REJECTION PATTERNS", "MOST FREQUENT QUARANTINE REASONS")
+            reasons_df = pd.DataFrame(rejection_reasons)
+            if not reasons_df.empty:
+                reasons_df = reasons_df.sort_values("rejected_events", ascending=True)
+                fig = px.bar(
+                    reasons_df.tail(12),
+                    x="rejected_events",
+                    y="error_reason",
+                    orientation="h",
+                    labels={"rejected_events": "Rejected events", "error_reason": "Reason"},
+                )
+                fig.update_layout(
+                    height=340,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#AAB7CA"),
+                    margin=dict(l=10, r=10, t=15, b=10),
+                    xaxis=dict(showgrid=True, gridcolor="rgba(148,163,184,.10)"),
+                    yaxis=dict(showgrid=False),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No quarantined events have been recorded.")
+
+        with right:
+            panel_heading("INGESTION GUIDANCE", "HOW ATLAS HANDLES INVALID EVENTS")
+            st.markdown(
+                "- Valid events are stored idempotently by `event_id`.\n"
+                "- Invalid messages are written to a durable quarantine table.\n"
+                "- Kafka offsets advance only after the database transaction.\n"
+                "- Duplicate deliveries do not create duplicate event rows.\n"
+                "- Raw rejected payloads are not exposed by the analytics API."
+            )
+            latest_rejection = ingestion_summary.get("latest_rejection_at")
+            st.caption(f"Latest quarantine record: {latest_rejection or 'None recorded'}")
+
+        st.markdown("---")
+        panel_heading("RECENT QUARANTINE", "SAFE METADATA ONLY — RAW MESSAGE CONTENT IS NOT EXPOSED")
+        if rejections:
+            rejected_df = pd.DataFrame(rejections)
+            safe_columns = [
+                name for name in [
+                    "rejected_at", "topic", "kafka_partition", "kafka_offset",
+                    "error_reason", "raw_value_bytes",
+                ] if name in rejected_df.columns
+            ]
+            st.dataframe(rejected_df[safe_columns], use_container_width=True, hide_index=True)
+        else:
+            st.info("No rejected records are currently available.")
 
 elif page == "Pipeline Operations":
     panel_heading(

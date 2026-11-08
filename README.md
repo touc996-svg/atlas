@@ -108,6 +108,9 @@ is not part of the repository.
 - `/health` — API, PostgreSQL, Redpanda and object-storage health
 - `/api/v1/analytics/summary` — aggregate event metrics
 - `/api/v1/analytics/telemetry` — recent event counts, partitions, latest offset and event age
+- `/api/v1/ingestion/summary` — accepted/rejected totals, recent rejection counts and rejection rate
+- `/api/v1/ingestion/rejections` — recent quarantine metadata (raw payloads are never returned)
+- `/api/v1/ingestion/rejections/by-reason` — rejection counts grouped by validation reason
 - `/api/v1/analytics/event-types` — event-type aggregates
 - `/api/v1/analytics/daily` — daily aggregates
 - `/api/v1/events` — recent events
@@ -123,6 +126,10 @@ Dashboard: `http://localhost:8501`
 - Throughput metrics are derived from PostgreSQL event timestamps, not native broker measurements.
 - Spark execution history and host resource utilization are not yet monitored.
 - Authentication, role-based access control, TLS, production secrets management and cloud deployment remain future work.
+
+## Ingestion observability
+
+The dashboard includes an Ingestion Health view backed by PostgreSQL quarantine telemetry. It reports accepted and rejected counts, rejection rates, recent failures and grouped rejection reasons. The API deliberately omits raw quarantined message bodies; it exposes only Kafka coordinates, the validation reason, timestamp and raw-value byte length.
 
 ## Security
 

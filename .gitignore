@@ -32,3 +32,5 @@ metastore_db/
 *.bak
 *.bak-*
 *.bak.*
+
+*.egg-info/
